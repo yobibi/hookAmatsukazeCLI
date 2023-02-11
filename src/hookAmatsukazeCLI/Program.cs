@@ -7,11 +7,18 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Diagnostics;
+using System.IO;
 
 namespace hookAmatsukazeCLI
 {
     class Program
     {
+        class AsyncArgument
+        {
+            public Process process;
+            public Stream stream;
+            public byte[] buffer;
+        }
         static void Main(string[] args)
         {
             string[] argv = Environment.GetCommandLineArgs();   // コマンド自体も[0]で取得
@@ -55,15 +62,42 @@ namespace hookAmatsukazeCLI
             p.StartInfo.RedirectStandardOutput = true;
             p.StartInfo.RedirectStandardError = true;
             p.Start();
-            p.OutputDataReceived += (sender, e) => {
-                Console.WriteLine(e.Data);
-            };
-            p.ErrorDataReceived += (sender, e) => {
-                Console.Error.WriteLine(e.Data);
-            };
-            p.BeginOutputReadLine();
-            p.BeginErrorReadLine();
+
+            byte[] bufOut = new byte[1024];
+            byte[] bufErr = new byte[1024];
+            AsyncArgument aaOut = new AsyncArgument();
+            AsyncArgument aaErr = new AsyncArgument();
+            aaOut.process = p;
+            aaOut.stream = p.StandardOutput.BaseStream;
+            aaOut.buffer = bufOut;
+            aaErr.process = p;
+            aaErr.stream = p.StandardError.BaseStream;
+            aaErr.buffer = bufErr;
+            aaOut.stream.BeginRead(bufOut, 0, bufOut.Length, StdOutCallback, aaOut);
+            aaErr.stream.BeginRead(bufErr, 0, bufErr.Length, StdErrCallback, aaErr);
             p.WaitForExit();
+        }
+        static void StdOutCallback(IAsyncResult ar)
+        {
+            AsyncArgument aa = ar.AsyncState as AsyncArgument;
+            int count = aa.stream.EndRead(ar);
+            string output = Console.OutputEncoding.GetString(aa.buffer, 0, count);
+            Console.Write(output);
+            if (!aa.process.HasExited)
+            {
+                aa.stream.BeginRead(aa.buffer, 0, aa.buffer.Length, StdOutCallback, aa);
+            }
+        }
+        static void StdErrCallback(IAsyncResult ar)
+        {
+            AsyncArgument aa = ar.AsyncState as AsyncArgument;
+            int count = aa.stream.EndRead(ar);
+            string output = Console.OutputEncoding.GetString(aa.buffer, 0, count);
+            Console.Error.Write(output);
+            if (!aa.process.HasExited)
+            {
+                aa.stream.BeginRead(aa.buffer, 0, aa.buffer.Length, StdErrCallback, aa);
+            }
         }
     }
 }
